@@ -1,1 +1,107 @@
+import numpy as np
+import pandas as pd
+import os
+from sklearn.model_selection import train_test_split
+train_data_file = "train.csv"
+test_data_file = "test.csv"
 
+X = pd.read_csv(train_data_file, index_col='Id')
+X_test = pd.read_csv(test_data_file, index_col='Id')
+
+X.dropna(axis=0, subset=['SalePrice'], inplace=True)
+y = X.SalePrice
+X.drop(['SalePrice'], axis=1, inplace=True)
+
+X.head()
+     low_cardinality_columns = [col for col in X.columns if X[col].nunique() < 10 and X[col].dtype == "object"]
+num_columns = [col for col in X.columns if X[col].dtype in ["int64", "float64"]]
+
+required_columns = low_cardinality_columns + num_columns
+high_cardinality_columns = [col for col in X.columns if col not in required_columns]
+
+print(required_columns)
+print("Dropped_columns", high_cardinality_columns)
+     from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import OneHotEncoder
+from xgboost import XGBRegressor
+from sklearn.model_selection import cross_val_score
+
+
+numerical_transformer = SimpleImputer(strategy="constant")
+
+categorical_transformer = Pipeline(steps=[
+    ("imputer", SimpleImputer(strategy="constant")),
+    ("one_hot_encoding", OneHotEncoder(handle_unknown='ignore'))
+])
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ("num", numerical_transformer, num_columns),
+        ("categorical", categorical_transformer, low_cardinality_columns)
+    ])
+
+def get_scores(n_estimators, learning_rate):
+    xgb_regressor_model = XGBRegressor(n_estimators=n_estimators,
+                                       learning_rate=learning_rate,
+                                       random_state=0,
+                                       n_jobs=4)
+
+    model_pipeline = Pipeline(steps=[
+        ("preprocessor", preprocessor),
+        ("model_run", xgb_regressor_model)
+    ])
+
+    scores = -1 * cross_val_score(model_pipeline, X, y, cv=3, scoring="neg_mean_absolute_error")
+
+    return scores.mean()
+     results = {}
+
+for i in range(8, 13):
+    for j in range(3):
+        results[(100*i, 0.04 + 0.01*j)] = get_scores(100*i, 0.04 + 0.01*j)
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import math
+
+print(results)
+
+x_axis = list(each[0] for each in results)
+y_axis = list(each[1] for each in results)
+error = list(results[each] for each in results)
+
+fig = plt.figure(figsize=(5,5))
+ax = fig.add_subplot(111, projection='3d')
+ax.scatter(x_axis, y_axis, error,
+           linewidths=1, alpha=.7,
+           edgecolor='k',
+           s = 200,
+           c=error)
+plt.show()
+
+min_mae = math.inf
+res = None
+for each in results:
+    if results[each] < min_mae:
+        min_mae = results[each]
+        res = each
+
+print(res, min_mae)
+import pickle
+xgb_regressor_model = XGBRegressor(n_estimators=res[0],
+                                   learning_rate=res[1],
+                                   random_state=0,
+                                   n_jobs=4)
+
+model_pipeline = Pipeline(steps=[
+    ("preprocessor", preprocessor),
+    ("model_run", xgb_regressor_model)
+])
+model_pipeline.fit(X, y)
+pickle.dump(model_pipeline, open("housing_price_model.pkl", "wb"))
+preds = model_pipeline.predict(X_test)
+     
+output = pd.DataFrame({"Id": X_test.index, "SalePrice": preds})
+output.to_csv("submission.csv", index=False)
+     output.head()
